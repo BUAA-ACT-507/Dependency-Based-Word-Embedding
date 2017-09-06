@@ -5,6 +5,8 @@ This repository contains the code for generating dependency-based word embedding
 
 * [Word2vec](https://code.google.com/archive/p/word2vec/)
 
+Some training data can be found here: http://mattmahoney.net/dc/enwik9.zip http://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
+
 ### Requirements
 * Linux system
 * [English Wikipedia Database](https://link.zhihu.com/?target=http%3A//download.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2)
