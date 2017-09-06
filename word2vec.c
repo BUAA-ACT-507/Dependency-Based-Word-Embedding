@@ -11,6 +11,10 @@
 //  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
+//
+//  Modified by Lin Ziwei and Li Chen in 2017
+//  Beihang University, Advanced Computer Technology(ACT)
+//  See readme.md on https://github.com/BUAA-ACT-507/Dependency-Based-Word-Embedding
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,119 +23,91 @@
 #include <ctype.h>
 #include <pthread.h>
 
-#define MAX_STRING 100//一个word的最大长度
-#define EXP_TABLE_SIZE 1000//对f的运算结果进行缓存，存储1000个，需要使用时查表
-#define MAX_EXP 6//最大计算到(exp^6 / (exp^6 + 1)),最小计算到(exp^-6 / (exp^-6 + 1))
-#define MAX_SENTENCE_LENGTH 1000//句子的最大长度为1000
-#define MAX_LINE 10000//一行的最大长度为10000
-#define MAX_CODE_LENGTH 40//最长的霍夫曼编码长度
-#define MAX_YICUN 6000//最多的依存关系个数
-#define PI (atan(1.0) * 4)//宏定义PI
+#define MAX_STRING 100
+#define EXP_TABLE_SIZE 1000
+#define MAX_EXP 6
+#define MAX_SENTENCE_LENGTH 1000
+#define MAX_LINE 10000
+#define MAX_CODE_LENGTH 40
+#define MAX_YICUN 6000                 //amount of dependencies(weights)
+#define PI (atan(1.0) * 4)
 
-const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vocabulary//哈希线性探测开放地址法，装填系数0.7
+const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vocabulary
 
 typedef float real;                    // Precision of float numbers
 
 struct vocab_word {
-	long long cn;//单词词频
-	int *point;//霍夫曼树中从根节点到该词的路径，存放每个非叶子结点的索引
-	char *word, *code, codelen;//词的字面表达，霍夫曼编码，编码长度
+	long long cn;
+	int *point;
+	char *word, *code, codelen;
 };
 
 typedef struct node
 {
-	long long word;//hash
+	long long word;
 	real score;
-	long long yicun[10];
-	long long jie;
+	long long yicun[10];			   //all dependencies of this word
+	long long jie;                     //order of dependence
 	struct node *next;
 }Node, *sNode;
 
-char train_file[MAX_STRING], output_file[MAX_STRING], new_output_file[MAX_STRING], weight_output_file[MAX_STRING];//训练文件名称，输出文件名称
-char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING], read_weightcn[MAX_STRING];//词汇表输入文件名称，与词汇表输出文件名称
-real weight[MAX_YICUN];//所有依存关系的权重
-int weightcn[MAX_YICUN];//所有依存关系的次数
-real multi[10] = {1, 1.2, 1.4, 1.8, 2.5, 3.4, 5, 6, 7, 8};//乘法系数
-real premulti[10] = {1, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.08, 0.06, 0.05};//乘法系数
-struct vocab_word *vocab;//声明词汇表结构体
-int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce = 1;
-//binary 0表示输出文件为二进制（默认），1表示输出文件为文本文件
-//cbow 1表示使用cbow框架，0表示使用skip-gram框架
-//debug_mode 大于0，加载完毕后输出汇总信息，大于1，加载训练词汇的时候输出信息，训练过程中输出信息
-//window 窗口大小，表示cbow中word vector的范围，也表示skip-gram中max space between words
-//min_count 表示删除长尾词的词频标准
-//num_threads 表示线程数
-//min_reduce 删除词频小于该值的词语，hash表装填词数是有限的
+char train_file[MAX_STRING], output_file[MAX_STRING], new_output_file[MAX_STRING], weight_output_file[MAX_STRING];
+char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING], read_weightcn[MAX_STRING];
+real weight[MAX_YICUN];               //all weights
+int weightcn[MAX_YICUN];              //frequency of weights
+real multi[10] = {1, 1.2, 1.4, 1.8, 2.5, 3.4, 5, 6, 7, 8};                       //preset value
+real premulti[10] = {1, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.08, 0.06, 0.05};         //preset value
+struct vocab_word *vocab;
+int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce = 1, new_operation = 0;
 
-int new_operation = 0;
-//新的依存关系的操作
-
-int *vocab_hash;//词汇表的hash存储，下标是词的hash，内容是词的在vocab结构中的位置，a[word_hash]=word index in vocab
+int *vocab_hash;
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100, weight_layer_size = 50;
-//vocab_max_size 词汇表的最大长度，可每次扩容1000
-//vocab_size 词汇表的现有长度，接近最大值时会扩增
-//layer1_size 隐层的节点数
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0, train_weights = 0, weight_size = 0;
-//train_words 训练的单词总数（词频累加）
-//word_count_actual 以训练完的word的个数
-//file_size 训练文件大小，ftell得到
-//classes 输出word_clusters的类别数
-//real alpha = 0.025, starting_alpha, sample = 1e-3;
 real alpha = 0.015, starting_alpha, sample = 1e-3, weight_sample = 1e-10;
-//alpha 表示学习率
-//starting_alpha 表示初始学习率
-//sample 亚采样概率，亚采样用来一定频率拒绝高频词，使得低频词由更多的出现几率
-real *syn0, *syn1, *syn1neg, *expTable, *syn2;
-//syn0 单词的向量输入 concatenate word vectors
-//syn1 hs(hierarchical softmax)算法中隐层节点到霍夫曼编码树非叶子结点的映射权值
-//syn2 额外的权重向量
-//syn1neg ns(negative sampling)中隐层节点到分类的映射权重
-//expTable 预先存储f函数结果，算法执行查表
+real *syn0, *syn1, *syn2, *syn1neg, *expTable;
 clock_t start;
 
 int hang = 0;
 int hs = 0, negative = 5;
-//hs 表示采用hs还是ns，默认hs
-const int table_size = 1e8;//静态采样表的规模
-int *table;//采样表
+const int table_size = 1e8;
+int *table;
 
-void InitUnigramTable() {//根据词频生成采样表
+void InitUnigramTable() {
 	int a, i;
 	long long train_words_pow = 0;
-	real d1, power = 0.75;//概率与词频的power次方成正比
-	table = (int *)malloc(table_size * sizeof(int));//为采样表划分内存
-	for (a = 0; a < vocab_size; a++) train_words_pow += pow(vocab[a].cn, power);//计算词汇表中单词词频^0.75的总数
+	real d1, power = 0.75;
+	table = (int *)malloc(table_size * sizeof(int));
+	for (a = 0; a < vocab_size; a++) train_words_pow += pow(vocab[a].cn, power);
 	i = 0;
-	d1 = pow(vocab[i].cn, power) / (real)train_words_pow;//第一个词出现的概率
+	d1 = pow(vocab[i].cn, power) / (real)train_words_pow;
 	for (a = 0; a < table_size; a++) {
 		table[a] = i;
-		if (a / (real)table_size > d1) {//如果当遍历操作指针位置与采样表总数的比例大于目前采样样本词频总和则取样
+		if (a / (real)table_size > d1) {
 			i++;
 			d1 += pow(vocab[i].cn, power) / (real)train_words_pow;
 		}
-		if (i >= vocab_size) i = vocab_size - 1;//处理最后一段概率，防止越界
+		if (i >= vocab_size) i = vocab_size - 1;
 	}
 }
 
-// Reads a single word from a file, assuming space + tab + EOL to be word boundaries
-void ReadWord(char *word, FILE *fin) {//每次从fin中获取一个单词
+void ReadWord(char *word, FILE *fin) {
 	int a = 0, ch;
 	while (!feof(fin)) {
-		ch = fgetc(fin);//从fin读取一个字符
-		if (ch == 13) continue;//将ASCII编码为13的字符略过
-		if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {//当读到' ','\t','\n'时
-			if (a > 0) {//不是读到的第一个字符
-				if (ch == '\n') ungetc(ch, fin);//退回一个字符到输入流中
+		ch = fgetc(fin);
+		if (ch == 13) continue;
+		if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
+			if (a > 0) {
+				if (ch == '\n') ungetc(ch, fin);
 				break;
 			}
-			if (ch == '\n') {//读到的第一个字符是'\n'，返回空字符
+			if (ch == '\n') {
 				strcpy(word, (char *)"</s>");
 				return;
 			}
 			else continue;
 		}
-		word[a] = ch;//不是上述字符则保存
-		a++;//位置后移一位
+		word[a] = ch;
+		a++;
 		if (a >= MAX_STRING - 1) a--;   // Truncate too long words
 	}
 	word[a] = 0;
@@ -147,7 +123,6 @@ int ReadNum(FILE* fin){
 		if ((ch == ' ') || (ch == '\t') || (ch == '\n')){
 			if (count > 0) {
 				if (ch == '\n') {
-				//ungetc(ch, fin);
 				break;
 				}
 			}
@@ -165,36 +140,32 @@ int ReadNum(FILE* fin){
 	return readnum;
 }
 
-// Returns hash value of a word
-int GetWordHash(char *word) {//返回一个单词的hash值
+int GetWordHash(char *word) {
 	unsigned long long a, hash = 0;
-	for (a = 0; a < strlen(word); a++) hash = hash * 257 + word[a];//hash计算方法
+	for (a = 0; a < strlen(word); a++) hash = hash * 257 + word[a];
 	hash = hash % vocab_hash_size;
 	return hash;
 }
 
-// Returns position of a word in the vocabulary; if the word is not found, returns -1
-int SearchVocab(char *word) {//寻找单词在词汇表位置
-	unsigned int hash = GetWordHash(word);//计算单词hash值
+int SearchVocab(char *word) {
+	unsigned int hash = GetWordHash(word);
 	if (strcmp(word, "</s>") == 0) return -2;
 	while (1) {
-		if (vocab_hash[hash] == -1) return -1;//未找到返回-1
-		if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];//匹配到则返回词汇表索引位置
-		hash = (hash + 1) % vocab_hash_size;//hash开放地址法继续寻找
+		if (vocab_hash[hash] == -1) return -1;
+		if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];
+		hash = (hash + 1) % vocab_hash_size;
 	}
-	return -1;//无用
+	return -1;
 }
 
-// Reads a word and returns its index in the vocabulary
-int ReadWordIndex(FILE *fin) {//读入一个单词 并返回其词汇表索引
+int ReadWordIndex(FILE *fin) {
 	char word[MAX_STRING];
 	ReadWord(word, fin);
-	if (feof(fin)) return -1;//如果读取到文件尾 返回-1
-	//printf("%s\t",word);
+	if (feof(fin)) return -1;
 	return SearchVocab(word);
 }
 
-int new_word(Node* tail, char *line, long long b, long long a) {
+int ReadNewWord(Node* tail, char *line, long long b, long long a) {
 	long long i, c, num, jie, status = 0;
 	real score = 1;
 	char word[MAX_STRING];
@@ -220,24 +191,18 @@ int new_word(Node* tail, char *line, long long b, long long a) {
 			if (!isalpha(line[i+1]) || i == a - 1) {
 				status = 1;
 				word[c] = 0;
-				//printf("%s\t", word);
 				temp->word = SearchVocab(word);
-				//printf("%s,%d***%s\t", vocab[temp->word].word,temp->word,word);
 			}
 		}
 		else if (status == 1) {
 			if (line[i] == ',') {
-				//save
 				temp->yicun[jie++] = num;
-				//printf("%d\t", num);
 				num = 0;
 			}
 			if(i < a){
 				if (i + 1 == a - 1 && isdigit(line[i])){
 					num = num * 10 + (line[i] - '0');
 					temp->yicun[jie++] = num;
-					//printf("%d\t", num);
-					//save
 					num = 0;
 					i++;
 					break;
@@ -245,20 +210,16 @@ int new_word(Node* tail, char *line, long long b, long long a) {
 				else if(isdigit(line[i]) && (!isdigit(line[i+1])) && line[i+1] != ',' && (line[i + 1] == ' ')) {
 					num = num * 10 + (line[i] - '0');
 					temp->yicun[jie++] = num;
-					//printf("%d\t", num);
-					//save
 					num = 0;
 					i++;
 					break;
 				}
 				else if (isdigit(line[i]) && i + 1 != a - 1 && line[i + 1] != ' '){
 					num = num * 10 + (line[i] - '0');
-					//printf("%dbbb  ", num);
 				}
 			}
 		}
 	}
-	//printf("%d阶\t", jie);
 	score = 1;
 	for (c = 0;c < 10;c++) {
 		if (temp->yicun[c] == -1) {
@@ -266,18 +227,12 @@ int new_word(Node* tail, char *line, long long b, long long a) {
 		}
 		else {
 			num = temp->yicun[c];
-			//printf("%f ", ((weight[num]) / multi[c]));
-			//score = (score) * ((weight[num]) / multi[c]);
 			score *= (weight[num]);
 			num = c;
-			//printf("%d\t", c);
-			
-			//printf("\n");
 		}
 	}
 	for (status = 0;status <= num;status++){
 				score /= multi[status];
-				//printf("%f\t", score);
 	}
 	temp->score = score;
 	temp->jie = jie;
@@ -285,11 +240,10 @@ int new_word(Node* tail, char *line, long long b, long long a) {
 	tail->next = temp;
 	tail = tail->next;
 	return i;
-	//return ++b;
 }
 
 // Reads a line and get all scores
-void GetScore(FILE *fin, Node* head, Node* tail) {//读入一行，并求得所有的score（链表中的值），并保存每个单词所对应的所有依存关系（链表）
+void GetScore(FILE *fin, Node* head, Node* tail) {
 	long long a, b, c, status;
 	char ch;
 	char word[MAX_STRING];
@@ -301,52 +255,35 @@ void GetScore(FILE *fin, Node* head, Node* tail) {//读入一行，并求得所�
 		ch = fgetc(fin);
 		if (ch == 13) continue;
 		if (ch == '\n' || feof(fin)) {
-			//printf("%s~~~~~~~~~~~~~~~~~\n",line);
 			if (a == 0) {
 				line[0] = '1';
 				return;
 			}
 			line[a] = '\0';
 			a++;
-			//处理
-			//status0-word, status1-yicun
 			status = 0;
-			//printf("%d\n",a);
-			//printf("step 1\t");
 			for (b = c = 0;b < a;b++) {
-				//step1: get target word
-				//step2: change to anther f(x), to get word, yicun
-				//step3: every word & yicun, a f(x)
 				if (status == 0 && isalpha(line[b])) {
 					word[c] = line[b];
 					c++;
-					if (c >= MAX_STRING - 1) {
-						c--;
-					}
+					if (c >= MAX_STRING - 1) c--;
 				}
 				if (status == 0 && (!isalpha(line[b]))) {
 					status = 1;
 					word[c] = 0;
-					//printf("%s\t", word);
 					tail->word = SearchVocab(word);
 				}
 				if (status == 1) {
-					b = new_word(tail, line, b, a);
+					b = ReadNewWord(tail, line, b, a);
 					if (tail->next->word == -1){
 						free(tail->next);
 						tail->next = NULL;
 					}
-					else{
-						tail = tail->next;
-					}
-					//printf("%f ", tail->score);
-					//printf("%d %d\n",tail->score,tail->jie);
+					else{tail = tail->next;}
 				}
 			}
 			if (a > 0) {
-				if (ch == '\n') {
-					return;
-				}
+				if (ch == '\n') return;
 			}
 			return;
 		}
@@ -356,111 +293,98 @@ void GetScore(FILE *fin, Node* head, Node* tail) {//读入一行，并求得所�
 				line[a] = ch;
 				a++;
 			}
-			else{
-				continue;
-			}
+			else{continue;}
 		}
 	}
 	return;
 }
 
-
-// Adds a word to the vocabulary
-int AddWordToVocab(char *word) {//在词汇表中添加一个单词
+int AddWordToVocab(char *word) {
 	unsigned int hash, length = strlen(word) + 1;
 	if (length > MAX_STRING) length = MAX_STRING;
-	vocab[vocab_size].word = (char *)calloc(length, sizeof(char));//为新添加单词新建内存空间并初始化0
+	vocab[vocab_size].word = (char *)calloc(length, sizeof(char));
 	strcpy(vocab[vocab_size].word, word);
-	vocab[vocab_size].cn = 0;//词频记0
-	vocab_size++;//词汇表现存有单词数
+	vocab[vocab_size].cn = 0;
+	vocab_size++;
 				 // Reallocate memory if needed
-	if (vocab_size + 2 >= vocab_max_size) {//如果词汇表将要存满
-		vocab_max_size += 1000;//扩容1000
-		vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));//动态扩容词汇表内存空间
+	if (vocab_size + 2 >= vocab_max_size) {
+		vocab_max_size += 1000;
+		vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
 	}
-	hash = GetWordHash(word);//计算单词hash值
-	while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;//如果hash对应位置不为空，则线性探索
-	vocab_hash[hash] = vocab_size - 1;//记录单词在词汇表中的索引
-	return vocab_size - 1;//返回单词在词汇表中的索引位置
+	hash = GetWordHash(word);
+	while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+	vocab_hash[hash] = vocab_size - 1;
+	return vocab_size - 1;
 }
 
-// Used later for sorting by word counts
-int VocabCompare(const void *a, const void *b) {//单词比较，使用单词词频进行词汇表排序
+int VocabCompare(const void *a, const void *b) {
 	return ((struct vocab_word *)b)->cn - ((struct vocab_word *)a)->cn;
 }
 
-// Sorts the vocabulary by frequency using word counts
-void SortVocab() {//按照词频排序
+void SortVocab() {
 	int a, size;
 	unsigned int hash;
 	// Sort the vocabulary and keep </s> at the first position
-	qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);//对词汇表进行快速排序
-	for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;//词汇表顺序重建，hash表需要重建
+	qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);
+	for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
 	size = vocab_size;
 	train_words = 0;
 	for (a = 0; a < size; a++) {
 		// Words occuring less than min_count times will be discarded from the vocab
-		if ((vocab[a].cn < min_count) && (a != 0)) {//词频低于最小值则删除
+		if ((vocab[a].cn < min_count) && (a != 0)) {
 			vocab_size--;
 			free(vocab[a].word);
 		}
-		else {//重建hash表
+		else {
 			  // Hash will be re-computed, as after the sorting it is not actual
 			hash = GetWordHash(vocab[a].word);
-			while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;//不为空则线性探索
-			vocab_hash[hash] = a;//记录单词在词汇表中的索引位置
-			train_words += vocab[a].cn;//需要训练的词频累加
+			while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+			vocab_hash[hash] = a;
+			train_words += vocab[a].cn;
 		}
 	}
-	vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));//释放多余空间
+	vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
 																							  // Allocate memory for the binary tree construction
-	for (a = 0; a < vocab_size; a++) {//为词汇表中单词分配霍夫曼编码与路径的存储空间
+	for (a = 0; a < vocab_size; a++) {
 		vocab[a].code = (char *)calloc(MAX_CODE_LENGTH, sizeof(char));
 		vocab[a].point = (int *)calloc(MAX_CODE_LENGTH, sizeof(int));
 	}
 }
 
-// Reduces the vocabulary by removing infrequent tokens
-void ReduceVocab() {//通过移除低频词汇减少词汇
+void ReduceVocab() {
 	int a, b = 0;
 	unsigned int hash;
-	for (a = 0; a < vocab_size; a++) if (vocab[a].cn > min_reduce) {//循环记录大于移除阀值的单词
+	for (a = 0; a < vocab_size; a++) if (vocab[a].cn > min_reduce) {
 		vocab[b].cn = vocab[a].cn;
 		vocab[b].word = vocab[a].word;
 		b++;
 	}
 	else free(vocab[a].word);
-	vocab_size = b;//新的词汇表单词个数
-	for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;//hash清空
-	for (a = 0; a < vocab_size; a++) {//重计算hash表
+	vocab_size = b;
+	for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
+	for (a = 0; a < vocab_size; a++) {
 									  // Hash will be re-computed, as it is not actual
 		hash = GetWordHash(vocab[a].word);
 		while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
 		vocab_hash[hash] = a;
 	}
 	fflush(stdout);
-	min_reduce++;//移除阀值加1
+	min_reduce++;
 }
 
-// Create binary Huffman tree using the word counts
-// Frequent words will have short uniqe binary codes
-void CreateBinaryTree() {//根据词频生成霍夫曼树
+void CreateBinaryTree() {
 	long long a, b, i, min1i, min2i, pos1, pos2, point[MAX_CODE_LENGTH];
 	char code[MAX_CODE_LENGTH];
-	long long *count = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));//记录原词汇表与点f合并后的点的词频
-	long long *binary = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));//记录词汇表与点合并后的点对应位置的二进制编码
-	long long *parent_node = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));//记录原词汇表中点合并后的对应位置
-	for (a = 0; a < vocab_size; a++) count[a] = vocab[a].cn;//将词汇表单词词频统计在count中
-	for (a = vocab_size; a < vocab_size * 2; a++) count[a] = 1e15;//在count后补齐一个vocab个数的1*10^15 记录后续词频和用
+	long long *count = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));
+	long long *binary = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));
+	long long *parent_node = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));
+	for (a = 0; a < vocab_size; a++) count[a] = vocab[a].cn;
+	for (a = vocab_size; a < vocab_size * 2; a++) count[a] = 1e15;
 	pos1 = vocab_size - 1;
 	pos2 = vocab_size;
-	// Following algorithm constructs the Huffman tree by adding one node at a time
-	//每次增加一个点
 	for (a = 0; a < vocab_size - 1; a++) {
-		// First, find two smallest nodes 'min1, min2'
-		//寻找两个词频最小的的点合并，较小的为0，较大的为1
-		if (pos1 >= 0) {//未到词汇表表首
-			if (count[pos1] < count[pos2]) {//寻找词频最低的单词
+		if (pos1 >= 0) {
+			if (count[pos1] < count[pos2]) {
 				min1i = pos1;
 				pos1--;
 			}
@@ -474,7 +398,7 @@ void CreateBinaryTree() {//根据词频生成霍夫曼树
 			pos2++;
 		}
 		if (pos1 >= 0) {
-			if (count[pos1] < count[pos2]) {//寻找词频第二低的单词
+			if (count[pos1] < count[pos2]) {
 				min2i = pos1;
 				pos1--;
 			}
@@ -487,29 +411,26 @@ void CreateBinaryTree() {//根据词频生成霍夫曼树
 			min2i = pos2;
 			pos2++;
 		}
-		count[vocab_size + a] = count[min1i] + count[min2i];//原词汇表后接的第a个位置写入两个被合并的节点的词频和
-		parent_node[min1i] = vocab_size + a;//记录该单词合并后的节点在词汇表后续中的位置
+		count[vocab_size + a] = count[min1i] + count[min2i];
+		parent_node[min1i] = vocab_size + a;
 		parent_node[min2i] = vocab_size + a;
-		binary[min2i] = 1;//二进制记录数组中相应位置被标记
+		binary[min2i] = 1;
 	}
-	// Now assign binary code to each vocabulary word
-	//沿树的父子关系构成编码
 	for (a = 0; a < vocab_size; a++) {
 		b = a;
 		i = 0;
 		while (1) {
-			code[i] = binary[b];//编码赋值
-			point[i] = b;//路径赋值，第一个节点为自己
-			i++;//编码个数
+			code[i] = binary[b];
+			point[i] = b;
+			i++;
 			b = parent_node[b];
 			if (b == vocab_size * 2 - 2) break;
 		}
-		//以下point比code多记录一层
-		vocab[a].codelen = i;//编码总长度，较实际少1，未计算根节点
-		vocab[a].point[0] = vocab_size - 2;//逆序，将第一个赋值为root
-		for (b = 0; b < i; b++) {//为vocab[a]装载相应霍夫曼编码（逆序）
-			vocab[a].code[i - b - 1] = code[b];//逆序编码，左子树为1，右子树为0
-			vocab[a].point[i - b] = point[b] - vocab_size;//逆序赋值，记录路径节点
+		vocab[a].codelen = i;
+		vocab[a].point[0] = vocab_size - 2;
+		for (b = 0; b < i; b++) {
+			vocab[a].code[i - b - 1] = code[b];
+			vocab[a].point[i - b] = point[b] - vocab_size;
 		}
 	}
 	free(count);
@@ -517,40 +438,40 @@ void CreateBinaryTree() {//根据词频生成霍夫曼树
 	free(parent_node);
 }
 
-void LearnVocabFromTrainFile() {//装载训练文件到词汇表
+void LearnVocabFromTrainFile() {
 	char word[MAX_STRING];
 	FILE *fin;
 	long long a, i;
-	for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;//初始化
+	for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
 	fin = fopen(train_file, "rb");
-	if (fin == NULL) {//文件不存在
+	if (fin == NULL) {
 		printf("ERROR: training data file not found!\n");
 		exit(1);
 	}
-	vocab_size = 0;//词汇表词汇数量置零
-	AddWordToVocab((char *)"</s>");//首先添加回车
+	vocab_size = 0;
+	AddWordToVocab((char *)"</s>");
 	while (1) {
-		ReadWord(word, fin);//读入一个正确单词
-		if (feof(fin)) break;//文件结尾则中断循环
-		train_words++;//读入词汇数量+1
-		if ((debug_mode > 1) && (train_words % 100000 == 0)) {//根据输出模式打印训练信息
+		ReadWord(word, fin);
+		if (feof(fin)) break;
+		train_words++;
+		if ((debug_mode > 1) && (train_words % 100000 == 0)) {
 			printf("%lldK%c", train_words / 1000, 13);
 			fflush(stdout);
 		}
-		i = SearchVocab(word);//寻找其在词汇表的索引位置
-		if (i == -1) {//不存在则添加 词频置一
+		i = SearchVocab(word);
+		if (i == -1) {
 			a = AddWordToVocab(word);
 			vocab[a].cn = 1;
 		}
-		else vocab[i].cn++;//存在词频+1
-		if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();//如果词汇表装入词汇达到阈值 则扩容
+		else vocab[i].cn++;
+		if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();
 	}
-	SortVocab();//所有词汇添加完毕 进行排序
+	SortVocab();
 	if (debug_mode > 0) {
 		printf("Vocab size: %lld\n", vocab_size);
 		printf("Words in train file: %lld\n", train_words);
 	}
-	file_size = ftell(fin);//记录文件大小
+	file_size = ftell(fin);
 	fclose(fin);
 }
 
@@ -1259,7 +1180,7 @@ void *TrainModelThread(void *id) {
 					f = 0;
 					for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1neg[c + l2];
 					for (c = 0;c < randomjie;c++){
-						for (z = layer1_size; z < layer1_size + weight_size; z++) f += syn2[z - layer1_size + randomyicun[c] * weight_layer_size] * syn1neg[z + l2] * premulti[c];
+						for (z = layer1_size; z < layer1_size + weight_layer_size; z++) f += syn2[z - layer1_size + randomyicun[c] * weight_layer_size] * syn1neg[z + l2];
 					}
 					//printf("\n%f\n",f);
 					//for (c = layer1_size; c < layer1_size + weight_layer_size; c++) f += syn2[c - layer1_size + l1] * syn1neg[c + l2];
@@ -1271,7 +1192,7 @@ void *TrainModelThread(void *id) {
 					for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * syn0[c + l1];
 					
 					for (c = 0;c < randomjie;c++){
-						for (z = layer1_size; z < layer1_size + weight_size; z++){
+						for (z = layer1_size; z < layer1_size + weight_layer_size; z++){
 							syn1neg[z + l2] += g * syn2[z - layer1_size + (randomyicun[c] * weight_layer_size)];
 						}
 					}
