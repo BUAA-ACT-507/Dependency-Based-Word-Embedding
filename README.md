@@ -9,12 +9,21 @@ Some training data can be found here: http://mattmahoney.net/dc/enwik9.zip http:
 
 ### Requirements
 * Linux system
-* [English Wikipedia Database](https://link.zhihu.com/?target=http%3A//download.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2) :large-scale corpus
+* Download [English Wikipedia Database](https://link.zhihu.com/?target=http%3A//download.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2) :large-scale corpus
 
 ### Setting up
 * Database pretreatment
-  * [Stanford Parser](https://nlp.stanford.edu/software/lex-parser.shtml)
-  * An Example for pre-trained corpus: that advocates 3358 philosophy 3358,5779 anarchism 3358,5779,466 is 3358,5779,452 a 3358,5779,456 political 3358,5779,4 societies 3358,458 based 3358,458,2890
-
+  * Tool: [Stanford Parser](https://nlp.stanford.edu/software/lex-parser.shtml)
+  * An Example for pre-trained corpus: institutions voluntary 4 based 4652 societies 4652,5782 advocates 4652,5782,3350
+* Count words and dependencies
+  * Get the result of words counting as vocab.txt
+  * Get the result of dependencies counting as weightcn.txt
   
+## Training Instructions
+
+* Experiment configurations are found in `demo-word.sh`
+* Choose an experiment that you would like to run
+  * For CBOW based on HS, run `time ./word2vec -train <trainfile> -output <outputfile> -new-output <extra-dimension-outputfile> -weight-output <weight(dependencites)-outputfile> -read-vocab vocab.txt -read-weightcn weightcn.txt -cbow 1 -size 300 -window 5 -negative -1 -hs 1 -sample 1e-4 -weight-sample 1e-10 -threads 500 -binary 0 -iter 10 -new_operation 1`
+  * For SG based on NS, run time ./word2vec -train <trainfile> -output <outputfile> -new-output <extra-dimension-outputfile> -weight-output <weight(dependencites)-outputfile> -read-vocab vocab.txt -read-weightcn weightcn.txt -cbow 0 -size 300 -window 5 -negative 4 -hs 0 -sample 1e-4 -weight-sample 1e-10 -threads 500 -binary 0 -iter 10 -new_operation 1
+`
   
