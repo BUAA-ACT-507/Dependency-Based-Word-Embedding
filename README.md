@@ -9,15 +9,15 @@ Some training data can be found here: http://mattmahoney.net/dc/enwik9.zip http:
 
 ### Requirements
 * Linux system
-* Download [English Wikipedia Database](https://link.zhihu.com/?target=http%3A//download.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2) :large-scale corpus
+* Download [English Wikipedia Database](https://link.zhihu.com/?target=http%3A//download.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2) : large-scale corpus
 
 ### Setting up
 * Database pretreatment
   * Tool: [Stanford Parser](https://nlp.stanford.edu/software/lex-parser.shtml)
   * An Example for pre-trained corpus: `institutions voluntary 4 based 4652 societies 4652,5782 advocates 4652,5782,3350`
 * Count words and dependencies
-  * Get the result of words counting as vocab.txt
-  * Get the result of dependencies counting as weightcn.txt
+  * Get the result of words counting as `vocab.txt`
+  * Get the result of dependencies counting as `weightcn.txt`
   
 ## Training Instructions
 * Experiment configurations are found in `demo-word.sh`
@@ -27,5 +27,5 @@ Some training data can be found here: http://mattmahoney.net/dc/enwik9.zip http:
 `
   
 ## Other Tips
-* Every line in weightcn.txt is corresponding to every line in depsl.txt 
+* Every line in weightcn.txt is corresponding to every line in `depsl.txt` 
 * The number of threads in parameter `-threads` is according to the performance of the computer which runs this algorithm, you must adjust it to your computer.
