@@ -14,7 +14,7 @@ Some training data can be found here: http://mattmahoney.net/dc/enwik9.zip http:
 ### Setting up
 * Database pretreatment
   * Tool: [Stanford Parser](https://nlp.stanford.edu/software/lex-parser.shtml)
-  * An Example for pre-trained corpus: institutions voluntary 4 based 4652 societies 4652,5782 advocates 4652,5782,3350
+  * An Example for pre-trained corpus: `institutions voluntary 4 based 4652 societies 4652,5782 advocates 4652,5782,3350`
 * Count words and dependencies
   * Get the result of words counting as vocab.txt
   * Get the result of dependencies counting as weightcn.txt
