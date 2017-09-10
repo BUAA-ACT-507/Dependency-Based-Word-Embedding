@@ -904,8 +904,8 @@ void *TrainModelThread(void *id) {
 							for (z = layer1_size; z < weight_layer_size + layer1_size; z++){
 								if (weight_sample > 0) {
 								real ran = (sqrt(weightcn[n->yicun[c]] / (weight_sample * train_weights)) + 1) * (weight_sample * train_weights) / weightcn[n->yicun[c]];
-								next_random = next_random * (unsigned long long)25214903917 + 11;
-								if (ran < (next_random & 0xFFFF) / (real)65536){ 
+								next_random_s = next_random_s * (unsigned long long)25214903917 + 11;
+								if (ran < (next_random_s & 0xFFFF) / (real)65536){ 
 										continue;
 									}else{
 										syn2[(z - layer1_size) + n->yicun[c] * weight_layer_size] += neu1e[z];
