@@ -1,11 +1,15 @@
 //  2017, Modified by Lin Ziwei and Li Chen on word2vec in 
 //  Advanced Computer Technology(ACT), Beihang University
+// Added:
+//   - support for different order of dependencies for HS&CBOW & NS&SG
+//   - different input context
 //  See readme.md on https://github.com/BUAA-ACT-507/Dependency-Based-Word-Embedding
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <ctype.h>
 #include <pthread.h>
 
@@ -566,6 +570,7 @@ void *TrainModelThread(void *id) {
 	long long learn_word_count = 0, last_learn_word_count = 0, word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
 	long long l1, l2, c, target, label, local_iter = iter;
 	int randomjie, randomyicun[5];
+	unsigned int randseed;
 	unsigned long long next_random = (long long)id;
 	unsigned long long next_random_s = (long long)id;
 	real f, g;
@@ -583,6 +588,10 @@ void *TrainModelThread(void *id) {
 	fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 	fseek(new_operation_fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 	int zd = 0;
+	randseed = (unsigned int)time(NULL) * 10;
+	randseed = randseed * 1103515245 + 12345;
+	randseed = randseed * 1103515245 + 12345;
+	randseed = randseed * 1103515245 + 12345;
 	while (1) {
 		zd++;
 		head = (sNode)malloc(sizeof(Node));
@@ -866,10 +875,12 @@ void *TrainModelThread(void *id) {
 						if (target == word) continue;
 						label = 0;
 					}
-					randomjie = rand()%(4 - 1 + 1) + 1;
+					randseed = randseed * 1103515245 + 12345;
+					randomjie = ((randseed << 16) | ((randseed >> 16) & 0xFFFF))%(4 - 1 + 1) + 1;
 					for (c = 0;c < randomjie;c++){
 						while (1){
-							randomyicun[c] = rand()%(5999 - 0 + 1) + 0;
+							randseed = randseed * 1103515245 + 12345;
+							randomyicun[c] = ((randseed << 16) | ((randseed >> 16) & 0xFFFF))%(5999 - 0 + 1) + 0;
 							if (weightcn[randomyicun[c]] == 0){
 								continue;
 							}else{
