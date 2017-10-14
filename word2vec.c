@@ -876,6 +876,7 @@ void *TrainModelThread(void *id) {
 						label = 0;
 					}
 					randseed = randseed * 1103515245 + 12345;
+					number_of_deps = ((randseed << 16) | ((randseed >> 16) & 0xFFFF))%(20 - 1 + 1) + 1;
 					randomjie = ((randseed << 16) | ((randseed >> 16) & 0xFFFF))%(4 - 1 + 1) + 1;
 					for (c = 0;c < randomjie;c++){
 						while (1){
