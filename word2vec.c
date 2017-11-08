@@ -53,7 +53,7 @@ int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads
 int *vocab_hash;
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100, weight_layer_size = 50;
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0, train_weights = 0, weight_size = 0;
-real alpha = 0.025, starting_alpha, sample = 1e-3, weight_sample = 1e-10;
+real alpha = 0.015, starting_alpha, sample = 1e-3, weight_sample = 1e-10;
 real *syn0, *syn1, *syn2, *syn1neg, *expTable;
 clock_t start;
 
@@ -588,7 +588,7 @@ void *TrainModelThread(void *id) {
 	fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 	fseek(new_operation_fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
 	int zd = 0;
-	randseed = (unsigned int)time(NULL) * 10;
+	randseed = (unsigned int)time(NULL) * 10 + id;
 	randseed = randseed * 1103515245 + 12345;
 	randseed = randseed * 1103515245 + 12345;
 	randseed = randseed * 1103515245 + 12345;
@@ -876,7 +876,6 @@ void *TrainModelThread(void *id) {
 						label = 0;
 					}
 					randseed = randseed * 1103515245 + 12345;
-					number_of_deps = ((randseed << 16) | ((randseed >> 16) & 0xFFFF))%(20 - 1 + 1) + 1;
 					randomjie = ((randseed << 16) | ((randseed >> 16) & 0xFFFF))%(4 - 1 + 1) + 1;
 					for (c = 0;c < randomjie;c++){
 						while (1){
@@ -907,49 +906,6 @@ void *TrainModelThread(void *id) {
 					}
 				}
 				// Learn weights input -> hidden
-				nn = head->next;
-				if (new_operation == 1){
-					last_word = target;
-					sizew = randomjie;
-					while(sizew > 0 && n!= NULL){
-						lamda = 1;
-						multir = 0;
-						multiresult = 0;
-						moda = 0;
-						modb = 0;
-						for (c = 0; c < layer1_size; c++) {
-							multir += (neu1w[c] * syn0[c + n->word * layer1_size]);
-							moda += (neu1w[c] * neu1w[c]); 
-							modb += (syn0[c + last_word * layer1_size] * syn0[c + last_word * layer1_size]);
-						}
-						for (c = 0;c < 10;c++) {
-							if (n->yicun[c] == -1) {
-								break;
-							}
-							else {
-								for (d = layer1_size; d < weight_layer_size + layer1_size; d++){
-									multir += (neu1w[c] * syn2[(d - layer1_size) + (n->yicun[c] * weight_layer_size)]);
-								}
-							}
-						}
-						for(a = 0;a < 10;a++){
-							if (n->yicun[a] == -1) break;
-							lamda *= multi[a];
-							multiresult = multir/count;
-							if (weight_sample > 0) {
-								real ran = (sqrt(weightcn[n->yicun[a]] / (weight_sample * train_weights)) + 1) * (weight_sample * train_weights) / weightcn[n->yicun[a]];
-								next_random = next_random * (unsigned long long)25214903917 + 11;
-								if (ran < (next_random & 0xFFFF) / (real)65536){ 
-									continue;
-								}else{
-									weight[n->yicun[a]] += (multiresult / lamda); 
-								}
-							}
-						}
-						sizew--;
-						n = n->next;
-					}
-				}
 				for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
 				for (c = 0;c < 10;c++) {
 						if (n->yicun[c] == -1) {
@@ -1190,4 +1146,3 @@ int main(int argc, char **argv) {
 	TrainModel();
 	return 0;
 }
-
